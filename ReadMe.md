@@ -1,4 +1,4 @@
-# Playwright Data Scrubber
+# Playwright Result Scrubber
 
 A tool for scrubbing sensitive information from Playwright HTML reports and trace files.
 
@@ -13,7 +13,7 @@ A tool for scrubbing sensitive information from Playwright HTML reports and trac
 ## Installation
 
 ```bash
-npm install --save-dev playwright-data-scrubber
+npm install --save-dev playwright-result-scrubber
 ```
 
 ## Usage
@@ -37,9 +37,9 @@ npx playwright-scrub --pattern "password['\"]?\\s*[=:]\\s*['\"]([^'\"]+)['\"]" "
 ### API Usage
 
 ```typescript
-import { scrubPlaywrightData } from 'playwright-data-scrubber';
+import { scrubPlaywrightResult } from 'playwright-result-scrubber';
 
-await scrubPlaywrightData('./playwright.config.ts', {
+await scrubPlaywrightResult('./playwright.config.ts', {
   rules: [
     { pattern: /password["']?\s*[=:]\s*["']([^"']+)["']/gi, replacement: 'password="********"' },
     { pattern: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, replacement: 'user@example.com' },
@@ -55,14 +55,14 @@ await scrubPlaywrightData('./playwright.config.ts', {
 Create a teardown file, for example `global-teardown.ts`:
 
 ```typescript
-import { scrubPlaywrightData } from 'playwright-data-scrubber';
+import { scrubPlaywrightResult } from 'playwright-result-scrubber';
 import { FullConfig } from '@playwright/test';
 
 async function globalTeardown(config: FullConfig) {
   // Run any other teardown logic here
   
-  // Run data scrubber
-  await scrubPlaywrightData(config.configFile || './playwright.config.ts', {
+  // Run result scrubber
+  await scrubPlaywrightResult(config.configFile || './playwright.config.ts', {
     rules: [
       { pattern: /password["']?\s*[=:]\s*["']([^"']+)["']/gi, replacement: 'password="********"' },
       { pattern: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, replacement: 'user@example.com' },

@@ -1,7 +1,7 @@
 /**
  * trace-scrubber.ts
  * 
- * Module for scrubbing sensitive data from Playwright trace files
+ * Module for scrubbing sensitive result from Playwright trace files
  */
 
 import fs from 'fs';
@@ -99,7 +99,7 @@ export class TraceScrubber {
         // If content changed, write it back
         if (content !== originalContent) {
             await fs.promises.writeFile(filePath, content, 'utf8');
-            this.log(`Scrubbed sensitive data from ${path.basename(filePath)}`);
+            this.log(`Scrubbed sensitive result from ${path.basename(filePath)}`);
         }
     }
 

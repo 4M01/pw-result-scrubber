@@ -1,7 +1,7 @@
 /**
  * html-scrubber.ts
  * 
- * Module for scrubbing sensitive data from HTML report files
+ * Module for scrubbing sensitive result from HTML report files
  */
 
 import fs from 'fs';
@@ -34,7 +34,7 @@ export class HtmlReportScrubber {
 
         // If content hasn't changed, no need to write it back
         if (content === originalContent) {
-            this.log(`No sensitive data found in ${filePath}`);
+            this.log(`No sensitive result found in ${filePath}`);
             return;
         }
 
@@ -47,7 +47,7 @@ export class HtmlReportScrubber {
 
         // Write scrubbed content
         await fs.promises.writeFile(outputPath, content, 'utf8');
-        this.log(`Scrubbed sensitive data from ${filePath}`);
+        this.log(`Scrubbed sensitive result from ${filePath}`);
 
         // Handle original file
         if (outputPath !== filePath && !this.options.preserveOriginals) {

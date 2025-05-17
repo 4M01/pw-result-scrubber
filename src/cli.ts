@@ -3,12 +3,12 @@
 /**
  * cli.ts
  * 
- * Command-line interface for the Playwright Data Scrubber
+ * Command-line interface for the Playwright Result Scrubber
  */
 
 import path from 'path';
 import fs from 'fs';
-import { scrubPlaywrightData, ScrubbingRule } from './index';
+import { scrubPlaywrightResult, ScrubbingRule } from './index';
 
 // Simple CLI argument parser
 function parseArgs(): {
@@ -133,7 +133,7 @@ function getDefaultRules(): ScrubbingRule[] {
 
 function printHelp(): void {
     console.log(`
-Playwright Data Scrubber - Remove sensitive information from Playwright reports and traces
+Playwright Result Scrubber - Remove sensitive information from Playwright reports and traces
 
 Usage: playwright-scrub [options]
 
@@ -179,7 +179,7 @@ async function main(): Promise<void> {
     }
 
     try {
-        await scrubPlaywrightData(configPath, {
+        await scrubPlaywrightResult(configPath, {
             rules,
             outputDir: outputDir || undefined,
             preserveOriginals,

@@ -1,5 +1,5 @@
 /**
- * playwright-data-scrubber
+ * playwright-result-scrubber
  * 
  * A package to scrub sensitive information from Playwright HTML reports and trace files.
  */
@@ -23,7 +23,7 @@ export interface ScrubberOptions {
     verbose?: boolean; // Enable verbose logging
 }
 
-export class PlaywrightDataScrubber {
+export class PlaywrightResultScrubber {
     private options: ScrubberOptions;
     private configPath: string;
     private projectRoot: string;
@@ -156,16 +156,16 @@ export class PlaywrightDataScrubber {
 
     private log(message: string): void {
         if (this.options.verbose) {
-            console.log(`[PlaywrightDataScrubber] ${message}`);
+            console.log(`[PlaywrightResultScrubber] ${message}`);
         }
     }
 }
 
 // Export helper functions for easy usage
-export async function scrubPlaywrightData(
+export async function scrubPlaywrightResult(
     configPath: string = './playwright.config.ts',
     options: ScrubberOptions
 ): Promise<void> {
-    const scrubber = new PlaywrightDataScrubber(configPath, options);
+    const scrubber = new PlaywrightResultScrubber(configPath, options);
     await scrubber.scrub();
 }

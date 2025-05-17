@@ -171,4 +171,4 @@ By default, the scrubber overwrites the original files. Use the `outputDir` opti
 
 ## License
 
-MIT
+Creative Commons Attribution-NoDerivatives (CC BY-ND)

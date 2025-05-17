@@ -1,6 +1,6 @@
 {
     "name": "playwright-result-scrubber",
-    "version": "1.0.0",
+    "version": "0.1.0",
     "description": "A tool to scrub sensitive information from Playwright HTML reports and trace files",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
@@ -18,8 +18,8 @@
         "report",
         "trace"
     ],
-    "author": "",
-    "license": "MIT",
+    "author": "Amol Chavan, 2amolchavan@gmail.com",
+    "license": "Creative Commons Attribution-NoDerivatives (CC BY-ND)",
     "dependencies": {
         "adm-zip": "^0.5.10",
         "glob": "^8.1.0",

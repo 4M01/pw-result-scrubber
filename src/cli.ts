@@ -105,7 +105,8 @@ function loadRulesFromFile(rulesFile: string | null, inlineRules: ScrubbingRule[
             process.exit(1);
         }
     } catch (error) {
-        console.error(`Failed to load rules file: ${error.message}`);
+        const message = (error instanceof Error) ? error.message : String(error);
+        console.error(`Failed to load rules file: ${message}`);
         process.exit(1);
     }
 }
@@ -187,13 +188,15 @@ async function main(): Promise<void> {
         });
         console.log('Scrubbing completed successfully!');
     } catch (error) {
-        console.error(`Error: ${error.message}`);
+        const message = (error instanceof Error) ? error.message : String(error);
+        console.error(`Error: ${message}`);
         process.exit(1);
     }
 }
 
 // Run the CLI
 main().catch(error => {
-    console.error(`Fatal error: ${error.message}`);
+    const message = (error instanceof Error) ? error.message : String(error);
+    console.error(`Fatal error: ${message}`);
     process.exit(1);
 });

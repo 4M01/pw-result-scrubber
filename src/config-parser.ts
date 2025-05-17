@@ -48,7 +48,9 @@ export async function parseConfig(configPath: string): Promise<PlaywrightConfig>
             const config = require(resolvedPath);
             return config.default || config;
         } catch (error) {
-            throw new Error(`Failed to parse JavaScript config: ${error.message}`);
+            const message = (error instanceof Error) ? error.message : String(error);
+            console.error(`Error: ${message}`);
+            process.exit(1);
         }
     }
 
@@ -67,7 +69,9 @@ export async function parseConfig(configPath: string): Promise<PlaywrightConfig>
             const { stdout } = await execAsync(`node "${tmpScriptPath}"`);
             return JSON.parse(stdout);
         } catch (error) {
-            throw new Error(`Failed to parse TypeScript config: ${error.message}`);
+            const message = (error instanceof Error) ? error.message : String(error);
+            console.error(`Error: ${message}`);
+            process.exit(1);
         } finally {
             if (fs.existsSync(tmpScriptPath)) {
                 fs.unlinkSync(tmpScriptPath);

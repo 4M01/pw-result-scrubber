@@ -16,6 +16,10 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
     steps:
       - uses: actions/checkout@v3
         with:
@@ -24,8 +28,8 @@ jobs:
 
       - name: Set up Git user
         run: |
-          git config --global user.name 'GitHub Actions'
-          git config --global user.email 'actions@github.com'
+          git config --global user.name '4M01'
+          git config --global user.email '2amolchavan@gmail.com'
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
@@ -71,6 +75,6 @@ jobs:
             Release v${{ steps.version.outputs.new_version }}
 
             Changes in this release:
-            - Please update this text with your release notes
+            - Initail Release with masking password from logs and traces
 
       # The publish workflow will run automatically when the release is created

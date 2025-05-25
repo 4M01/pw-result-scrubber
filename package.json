@@ -44,5 +44,6 @@
     ],
     "bin": {
         "playwright-scrub": "./dist/cli.js"
-    }
+    },
+    "type": "module"
 }

@@ -48,7 +48,7 @@ jobs:
         run: |
           # Bump the version and get the new version
           npm version ${{ github.event.inputs.version }} --no-git-tag-version
-          NEW_VERSION=$(node -p "require('./package.json').version")
+          NEW_VERSION=$(node -p "import('./package.json').then(pkg => pkg.version)")
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
       - name: Commit and push changes

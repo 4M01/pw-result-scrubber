@@ -4,9 +4,9 @@
  * Utility to parse Playwright config files
  */
 
+import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
@@ -40,12 +40,10 @@ export async function parseConfig(configPath: string): Promise<PlaywrightConfig>
 
     const ext = path.extname(resolvedPath).toLowerCase();
 
-    // For JavaScript files, we can require them directly
+    // For JavaScript files, use dynamic import
     if (ext === '.js') {
         try {
-            // Delete require cache to ensure we get fresh config
-            delete require.cache[require.resolve(resolvedPath)];
-            const config = require(resolvedPath);
+            const config = await import(resolvedPath);
             return config.default || config;
         } catch (error) {
             const message = (error instanceof Error) ? error.message : String(error);
@@ -54,15 +52,14 @@ export async function parseConfig(configPath: string): Promise<PlaywrightConfig>
         }
     }
 
-    // For TypeScript files, we need to use ts-node to execute them
+    // For TypeScript files, use ts-node to execute them
     else if (ext === '.ts') {
-        // Create a small script to output the config as JSON
         const tmpScriptPath = path.join(process.cwd(), '.temp-config-script.js');
         const script = `
-      require('ts-node/register');
-      const config = require('${resolvedPath.replace(/\\/g, '\\\\')}');
-      console.log(JSON.stringify(config.default || config));
-    `;
+import 'ts-node/register';
+import config from '${resolvedPath.replace(/\\/g, '\\\\')}';
+console.log(JSON.stringify(config.default || config));
+`;
 
         try {
             fs.writeFileSync(tmpScriptPath, script);

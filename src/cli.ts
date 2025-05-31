@@ -6,19 +6,19 @@
  * Command-line interface for the Playwright Result Scrubber
  */
 
-import path from 'path';
 import fs from 'fs';
-import { scrubPlaywrightResult, ScrubbingRule } from './index';
+import path from 'path';
+import { ScrubbingRule, scrubPlaywrightResult } from './index';
 
 // Simple CLI argument parser
-function parseArgs(): {
+async function parseArgs(): Promise<{
     configPath: string;
     rulesFile: string | null;
     outputDir: string | null;
     preserveOriginals: boolean;
     verbose: boolean;
     rules: ScrubbingRule[];
-} {
+}> {
     const args = process.argv.slice(2);
     let configPath = './playwright.config.ts';
     let rulesFile: string | null = null;
@@ -51,7 +51,7 @@ function parseArgs(): {
     }
 
     // Load rules from file if specified
-    const rules = loadRulesFromFile(rulesFile, inlineRules);
+    const rules = await loadRulesFromFile(rulesFile, inlineRules);
 
     return {
         configPath,
@@ -63,7 +63,7 @@ function parseArgs(): {
     };
 }
 
-function loadRulesFromFile(rulesFile: string | null, inlineRules: ScrubbingRule[]): ScrubbingRule[] {
+async function loadRulesFromFile(rulesFile: string | null, inlineRules: ScrubbingRule[]): Promise<ScrubbingRule[]> {
     // If we have inline rules, use those
     if (inlineRules.length > 0) {
         return inlineRules;
@@ -97,9 +97,8 @@ function loadRulesFromFile(rulesFile: string | null, inlineRules: ScrubbingRule[
             const content = fs.readFileSync(rulesFile, 'utf8');
             return JSON.parse(content);
         } else if (ext === '.js') {
-            // Delete require cache to ensure we get fresh rules
-            delete require.cache[require.resolve(rulesFile)];
-            return require(path.resolve(rulesFile));
+            // Use dynamic import for ES Modules
+            return (await import(path.resolve(rulesFile))).default || (await import(path.resolve(rulesFile)));
         } else {
             console.error(`Unsupported rules file extension: ${ext}`);
             process.exit(1);
@@ -163,7 +162,7 @@ async function main(): Promise<void> {
         preserveOriginals,
         verbose,
         rules
-    } = parseArgs();
+    } = await parseArgs();
 
     if (rules.length === 0) {
         console.error('No scrubbing rules defined. Please provide rules via file or inline patterns.');

@@ -4,9 +4,8 @@
  * A package to scrub sensitive information from Playwright HTML reports and trace files.
  */
 
-import fs from 'fs';
-import path from 'path';
 import glob from 'glob';
+import path from 'path';
 import { parseConfig } from './config-parser';
 import { HtmlReportScrubber } from './html-scrubber';
 import { TraceScrubber } from './trace-scrubber';

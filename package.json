@@ -1,6 +1,6 @@
 {
     "name": "playwright-result-scrubber",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "A tool to scrub sensitive information from Playwright HTML reports and trace files",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",

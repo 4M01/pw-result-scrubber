@@ -1,76 +1,74 @@
 /**
  * html-scrubber.ts
- * 
- * Module for scrubbing sensitive result from HTML report files
+ * HTML Report Scrubber with enhanced OOP design
  */
 
 import fs from 'fs';
-import path from 'path';
-import { ScrubberOptions } from './index';
+import { AbstractScrubber } from './abstract-scrubber';
+import { FileProcessor } from './file-processor';
+import { ScrubberOptions } from './types';
 
-export class HtmlReportScrubber {
-    private options: ScrubberOptions;
+export class HtmlReportScrubber extends AbstractScrubber {
+    private readonly fileProcessor: FileProcessor;
 
-    constructor(options: ScrubberOptions) {
-        this.options = options;
+    constructor(htmlReportDir: string, options: ScrubberOptions) {
+        super(options, 'HtmlReportScrubber');
+
+        // ASSUMPTION: HTML reports contain .html and .js files
+        this.fileProcessor = new FileProcessor(htmlReportDir, ['.html', '.js']);
+    }
+
+    /**
+     * Scrub all HTML report files
+     * ASSUMPTION: HTML report directory exists
+     */
+    async scrubAllFiles(): Promise<void> {
+        const files = await this.fileProcessor.findFiles();
+
+        if (files.length === 0) {
+            this.log('No HTML or JS files found in report directory');
+            return;
+        }
+
+        this.log(`Found ${files.length} files to process`);
+
+        for (const file of files) {
+            await this.scrubFile(file);
+        }
     }
 
     /**
      * Scrub a single HTML or JS file
+     * ASSUMPTION: File is text-based and can be read as UTF-8
      */
     async scrubFile(filePath: string): Promise<void> {
-        // Read file content
-        let content = await fs.promises.readFile(filePath, 'utf8');
-        let originalContent = content;
-
-        // Apply all scrubbing rules
-        for (const rule of this.options.rules) {
-            const pattern = typeof rule.pattern === 'string'
-                ? new RegExp(rule.pattern, 'g')
-                : rule.pattern;
-
-            content = content.replace(pattern, rule.replacement);
-        }
-
-        // If content hasn't changed, no need to write it back
-        if (content === originalContent) {
-            this.log(`No sensitive result found in ${filePath}`);
+        if (!(await this.fileProcessor.isFileAccessible(filePath))) {
+            this.log(`Warning: Cannot access file ${filePath}`);
             return;
         }
 
-        // Determine output path
-        const outputPath = this.getOutputPath(filePath);
+        try {
+            // Read file content
+            const content = await fs.promises.readFile(filePath, 'utf8');
+            const scrubbedContent = this.applyScrubRules(content);
 
-        // Create directory if it doesn't exist
-        const outputDir = path.dirname(outputPath);
-        await fs.promises.mkdir(outputDir, { recursive: true });
+            // Check if content changed
+            if (!this.hasContentChanged(content, scrubbedContent)) {
+                this.log(`No sensitive data found in ${filePath}`);
+                return;
+            }
 
-        // Write scrubbed content
-        await fs.promises.writeFile(outputPath, content, 'utf8');
-        this.log(`Scrubbed sensitive result from ${filePath}`);
+            // Write scrubbed content
+            const outputPath = this.getOutputPath(filePath);
+            await this.ensureOutputDirectory(outputPath);
+            await fs.promises.writeFile(outputPath, scrubbedContent, 'utf8');
 
-        // Handle original file
-        if (outputPath !== filePath && !this.options.preserveOriginals) {
-            await fs.promises.unlink(filePath);
-            this.log(`Removed original file ${filePath}`);
-        }
-    }
+            this.log(`Scrubbed sensitive data from ${filePath}`);
+            await this.handleOriginalFile(filePath, outputPath);
 
-    /**
-     * Determine the output path for a scrubbed file
-     */
-    private getOutputPath(filePath: string): string {
-        if (!this.options.outputDir) {
-            return filePath; // Overwrite original
-        }
-
-        const relativePath = path.relative(process.cwd(), filePath);
-        return path.join(this.options.outputDir, relativePath);
-    }
-
-    private log(message: string): void {
-        if (this.options.verbose) {
-            console.log(`[HtmlReportScrubber] ${message}`);
+        } catch (error) {
+            this.log(`Error processing file ${filePath}: ${error}`);
+            throw error;
         }
     }
 }

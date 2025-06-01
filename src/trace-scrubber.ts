@@ -1,80 +1,118 @@
 /**
  * trace-scrubber.ts
- * 
- * Module for scrubbing sensitive result from Playwright trace files
+ * Trace Scrubber with enhanced OOP design
  */
 
+import AdmZip from 'adm-zip';
 import fs from 'fs';
 import path from 'path';
-import AdmZip from 'adm-zip';
-import { ScrubberOptions } from './index';
+import { AbstractScrubber } from './abstract-scrubber';
+import { FileProcessor } from './file-processor';
+import { ScrubberOptions } from './types';
 
-export class TraceScrubber {
-    private options: ScrubberOptions;
+export class TraceScrubber extends AbstractScrubber {
+    private readonly fileProcessor: FileProcessor;
+    private readonly traceDir: string;
 
-    constructor(options: ScrubberOptions) {
-        this.options = options;
+    constructor(traceDir: string, options: ScrubberOptions) {
+        super(options, 'TraceScrubber');
+
+        this.traceDir = traceDir;
+        // ASSUMPTION: Trace files are stored as .zip files
+        this.fileProcessor = new FileProcessor(traceDir, ['.zip']);
+
+        this.log(`Initialized TraceScrubber for directory: ${traceDir}`);
     }
 
     /**
-     * Scrub a single trace file (ZIP format)
+     * Scrub all trace files
+     * ASSUMPTION: Trace directory exists
      */
-    async scrubFile(filePath: string): Promise<void> {
-        this.log(`Processing trace file: ${filePath}`);
+    async scrubAllFiles(): Promise<void> {
+        this.log(`Looking for trace files in: ${this.traceDir}`);
 
-        // Create temp directory for extraction
-        const tempDir = path.join(process.cwd(), '.trace-scrubber-temp', path.basename(filePath, '.zip'));
-        await fs.promises.mkdir(tempDir, { recursive: true });
+        // Check if directory exists
+        if (!fs.existsSync(this.traceDir)) {
+            this.log(`Trace directory does not exist: ${this.traceDir}`);
+            return;
+        }
 
+        // List directory contents for debugging
         try {
-            // Extract trace zip file
-            const zip = new AdmZip(filePath);
-            zip.extractAllTo(tempDir, true);
+            const dirContents = fs.readdirSync(this.traceDir);
+            this.log(`Directory contents: ${dirContents.join(', ')}`);
 
-            // Process trace files
-            await this.processTraceDirectory(tempDir);
+            // Check for any .zip files manually
+            const zipFiles = dirContents.filter(file => file.endsWith('.zip'));
+            this.log(`ZIP files found manually: ${zipFiles.join(', ')}`);
+        } catch (error) {
+            this.log(`Error reading directory: ${error}`);
+        }
 
-            // Determine output path
-            const outputPath = this.getOutputPath(filePath);
+        const files = await this.fileProcessor.findFiles();
 
-            // Create new zip file
-            const newZip = new AdmZip();
-            const files = this.getAllFiles(tempDir);
+        if (files.length === 0) {
+            this.log('No trace files found');
+            return;
+        }
 
-            for (const file of files) {
-                const relativePath = path.relative(tempDir, file);
-                newZip.addLocalFile(file, path.dirname(relativePath));
-            }
+        this.log(`Found ${files.length} trace files to process`);
 
-            // Create directory if it doesn't exist
-            const outputDir = path.dirname(outputPath);
-            await fs.promises.mkdir(outputDir, { recursive: true });
-
-            // Write new zip file
-            newZip.writeZip(outputPath);
-            this.log(`Wrote scrubbed trace to ${outputPath}`);
-
-            // Handle original file
-            if (outputPath !== filePath && !this.options.preserveOriginals) {
-                await fs.promises.unlink(filePath);
-                this.log(`Removed original trace file ${filePath}`);
-            }
-        } finally {
-            // Clean up temp directory
-            await fs.promises.rm(tempDir, { recursive: true, force: true });
+        for (const file of files) {
+            await this.scrubFile(file);
         }
     }
 
     /**
-     * Process all files in the extracted trace directory
+     * Scrub a single trace file (ZIP format)
+     * ASSUMPTION: Trace file is a valid ZIP archive
+     * ASSUMPTION: We have write permissions for temp directory
      */
-    private async processTraceDirectory(dirPath: string): Promise<void> {
-        const files = this.getAllFiles(dirPath);
+    async scrubFile(filePath: string): Promise<void> {
+        this.log(`Processing trace file: ${filePath}`);
+
+        const tempDir = path.join(process.cwd(), '.trace-scrubber-temp', path.basename(filePath, '.zip'));
+
+        try {
+            await this.processTraceFile(filePath, tempDir);
+        } finally {
+            await this.cleanup(tempDir);
+        }
+    }
+
+    /**
+     * Process a single trace file
+     */
+    private async processTraceFile(filePath: string, tempDir: string): Promise<void> {
+        // Create temp directory
+        await fs.promises.mkdir(tempDir, { recursive: true });
+
+        // Extract ZIP file
+        const zip = new AdmZip(filePath);
+        zip.extractAllTo(tempDir, true);
+
+        // Process extracted files
+        await this.processExtractedFiles(tempDir);
+
+        // Create new ZIP with scrubbed content
+        const outputPath = this.getOutputPath(filePath);
+        await this.createScrubbedZip(tempDir, outputPath);
+
+        this.log(`Wrote scrubbed trace to ${outputPath}`);
+        await this.handleOriginalFile(filePath, outputPath);
+    }
+
+    /**
+     * Process all extracted files from trace
+     * ASSUMPTION: Trace contains text files (.json, .txt, .html, .js) that may have sensitive data
+     */
+    private async processExtractedFiles(tempDir: string): Promise<void> {
+        const files = this.fileProcessor.getAllFilesRecursively(tempDir);
+        const textExtensions = ['.json', '.txt', '.html', '.js'];
 
         for (const file of files) {
             const ext = path.extname(file).toLowerCase();
-
-            if (ext === '.json' || ext === '.txt' || ext === '.html' || ext === '.js') {
+            if (textExtensions.includes(ext)) {
                 await this.scrubTextFile(file);
             }
         }
@@ -82,60 +120,48 @@ export class TraceScrubber {
 
     /**
      * Scrub a text file within the trace
+     * ASSUMPTION: Files are UTF-8 encoded text files
      */
     private async scrubTextFile(filePath: string): Promise<void> {
-        let content = await fs.promises.readFile(filePath, 'utf8');
-        let originalContent = content;
+        try {
+            const content = await fs.promises.readFile(filePath, 'utf8');
+            const scrubbedContent = this.applyScrubRules(content);
 
-        // Apply all scrubbing rules
-        for (const rule of this.options.rules) {
-            const pattern = typeof rule.pattern === 'string'
-                ? new RegExp(rule.pattern, 'g')
-                : rule.pattern;
-
-            content = content.replace(pattern, rule.replacement);
-        }
-
-        // If content changed, write it back
-        if (content !== originalContent) {
-            await fs.promises.writeFile(filePath, content, 'utf8');
-            this.log(`Scrubbed sensitive result from ${path.basename(filePath)}`);
+            if (this.hasContentChanged(content, scrubbedContent)) {
+                await fs.promises.writeFile(filePath, scrubbedContent, 'utf8');
+                this.log(`Scrubbed sensitive data from ${path.basename(filePath)}`);
+            }
+        } catch (error) {
+            this.log(`Warning: Could not process file ${filePath}: ${error}`);
         }
     }
 
     /**
-     * Recursively get all files in a directory
+     * Create new ZIP file with scrubbed content
+     * ASSUMPTION: We have write permissions for output directory
      */
-    private getAllFiles(dirPath: string, arrayOfFiles: string[] = []): string[] {
-        const files = fs.readdirSync(dirPath);
+    private async createScrubbedZip(tempDir: string, outputPath: string): Promise<void> {
+        await this.ensureOutputDirectory(outputPath);
+
+        const newZip = new AdmZip();
+        const files = this.fileProcessor.getAllFilesRecursively(tempDir);
 
         for (const file of files) {
-            const fullPath = path.join(dirPath, file);
-            if (fs.statSync(fullPath).isDirectory()) {
-                this.getAllFiles(fullPath, arrayOfFiles);
-            } else {
-                arrayOfFiles.push(fullPath);
-            }
+            const relativePath = path.relative(tempDir, file);
+            newZip.addLocalFile(file, path.dirname(relativePath));
         }
 
-        return arrayOfFiles;
+        newZip.writeZip(outputPath);
     }
 
     /**
-     * Determine the output path for a scrubbed file
+     * Clean up temporary directory
      */
-    private getOutputPath(filePath: string): string {
-        if (!this.options.outputDir) {
-            return filePath; // Overwrite original
-        }
-
-        const relativePath = path.relative(process.cwd(), filePath);
-        return path.join(this.options.outputDir, relativePath);
-    }
-
-    private log(message: string): void {
-        if (this.options.verbose) {
-            console.log(`[TraceScrubber] ${message}`);
+    private async cleanup(tempDir: string): Promise<void> {
+        try {
+            await fs.promises.rm(tempDir, { recursive: true, force: true });
+        } catch (error) {
+            this.log(`Warning: Could not clean up temp directory ${tempDir}: ${error}`);
         }
     }
 }

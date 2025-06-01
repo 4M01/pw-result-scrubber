@@ -1,7 +1,6 @@
 /**
  * config-parser.ts
- * 
- * Utility to parse Playwright config files
+ * Enhanced configuration parser with better OOP design
  */
 
 import { exec } from 'child_process';
@@ -9,162 +8,177 @@ import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { promisify } from 'util';
+import { DirectoryPaths, PlaywrightConfig } from './types';
 
 const execAsync = promisify(exec);
 
-interface PlaywrightConfig {
-    reporter?: Array<string | [string, any]>;
-    outputDir?: string;
-    use?: {
-        trace?: boolean | string | {
-            mode?: string;
-            snapshots?: boolean;
-            screenshots?: boolean;
-            sources?: boolean;
-            attachments?: boolean;
-        };
-        [key: string]: any;
-    };
-    [key: string]: any;
-}
+export class PlaywrightConfigParser {
+    private readonly configPath: string;
+    private readonly projectRoot: string;
 
-/**
- * Add default paths for HTML reports and traces if not configured
- */
-function addDefaultPaths(config: PlaywrightConfig): PlaywrightConfig {
-    const result = { ...config };
+    constructor(configPath: string) {
+        // ASSUMPTION: Config path is provided and should exist
+        this.configPath = path.resolve(configPath);
+        this.projectRoot = path.dirname(this.configPath);
 
-    // Set default outputDir if not specified
-    if (!result.outputDir) {
-        result.outputDir = 'test-results';
-    }
-
-    // Ensure reporter array exists
-    if (!result.reporter || !Array.isArray(result.reporter)) {
-        result.reporter = [];
-    }
-
-    // Check if HTML reporter is already configured
-    const hasHtmlReporter = result.reporter.some(reporter => {
-        if (typeof reporter === 'string') {
-            return reporter === 'html';
+        if (!fs.existsSync(this.configPath)) {
+            throw new Error(`Config file not found: ${this.configPath}`);
         }
-        if (Array.isArray(reporter)) {
-            return reporter[0] === 'html';
+    }
+
+    /**
+     * Parse Playwright configuration file
+     * ASSUMPTION: Config file is either .js or .ts and follows Playwright config structure
+     * DEFAULT: Adds default reporter and output directory if not specified
+     */
+    async parse(): Promise<PlaywrightConfig> {
+        const ext = path.extname(this.configPath).toLowerCase();
+        let config: PlaywrightConfig;
+
+        switch (ext) {
+            case '.js':
+                config = await this.parseJavaScriptConfig();
+                break;
+            case '.ts':
+                config = await this.parseTypeScriptConfig();
+                break;
+            default:
+                throw new Error(`Unsupported config file extension: ${ext}. Supported: .js, .ts`);
         }
-        return false;
-    });
 
-    // Add default HTML reporter if not present
-    if (!hasHtmlReporter) {
-        result.reporter.push(['html', { outputFolder: 'playwright-report' }]);
+        return this.addDefaults(config);
     }
 
-    // Don't set default trace configuration - let user's config determine this
-    // The scrubbing tool should work with whatever trace settings the user has
-
-    return result;
-}
-
-/**
- * Parse a Playwright config file
- * This handles both JavaScript and TypeScript config files
- */
-export async function parseConfig(configPath: string): Promise<PlaywrightConfig> {
-    const resolvedPath = path.resolve(configPath);
-
-    if (!fs.existsSync(resolvedPath)) {
-        throw new Error(`Config file not found: ${resolvedPath}`);
-    }
-
-    const ext = path.extname(resolvedPath).toLowerCase();
-    let config: PlaywrightConfig;
-
-    // For JavaScript files, use dynamic import
-    if (ext === '.js') {
+    /**
+     * Parse JavaScript configuration
+     * ASSUMPTION: File exports a valid Playwright config object
+     */
+    private async parseJavaScriptConfig(): Promise<PlaywrightConfig> {
         try {
-            const configModule = await import(pathToFileURL(resolvedPath).toString());
-            config = configModule.default || configModule;
+            const configModule = await import(pathToFileURL(this.configPath).toString());
+            return configModule.default || configModule;
         } catch (error) {
-            const message = (error instanceof Error) ? error.message : String(error);
-            console.error(`Error: ${message}`);
-            process.exit(1);
+            throw new Error(`Failed to load JavaScript config: ${error}`);
         }
     }
 
-    // For TypeScript files, use ts-node to execute them
-    else if (ext === '.ts') {
+    /**
+     * Parse TypeScript configuration using ts-node
+     * ASSUMPTION: ts-node is available in the environment
+     * ASSUMPTION: TypeScript config compiles successfully
+     */
+    private async parseTypeScriptConfig(): Promise<PlaywrightConfig> {
         const tmpScriptPath = path.join(process.cwd(), '.temp-config-script.mjs');
         const script = `
 try {
-    const config = await import('${pathToFileURL(resolvedPath).toString()}');
+    const config = await import('${pathToFileURL(this.configPath).toString()}');
     console.log(JSON.stringify(config.default || config));
 } catch (error) {
     console.error('Failed to load config:', error.message);
     process.exit(1);
-}
-`;
+}`;
 
         try {
             fs.writeFileSync(tmpScriptPath, script);
-            // Use ts-node/esm loader which handles ES modules properly
             const { stdout } = await execAsync(`node --loader ts-node/esm "${tmpScriptPath}"`);
-            config = JSON.parse(stdout);
+            return JSON.parse(stdout);
         } catch (error) {
-            const message = (error instanceof Error) ? error.message : String(error);
-            console.error(`Error: ${message}`);
-            process.exit(1);
+            throw new Error(`Failed to load TypeScript config: ${error}`);
         } finally {
-            if (fs.existsSync(tmpScriptPath)) {
-                fs.unlinkSync(tmpScriptPath);
-            }
+            await this.cleanup(tmpScriptPath);
         }
-    } else {
-        throw new Error(`Unsupported config file extension: ${ext}`);
     }
 
-    // Add default paths for HTML reports and traces
-    return addDefaultPaths(config);
-}
+    /**
+     * Add default configuration values
+     * DEFAULT: outputDir = 'test-results', HTML reporter = 'playwright-report'
+     */
+    private addDefaults(config: PlaywrightConfig): PlaywrightConfig {
+        const result = { ...config };
 
-/**
- * Extract directory paths for HTML reports and traces from config
- */
-export function getDirectoryPaths(config: PlaywrightConfig): {
-    htmlReportDir: string | null;
-    traceDir: string | null;
-} {
-    let htmlReportDir: string | null = null;
+        // DEFAULT: Set default outputDir
+        if (!result.outputDir) {
+            result.outputDir = 'test-results';
+        }
 
-    // Find HTML reporter configuration
-    if (config.reporter) {
+        // DEFAULT: Ensure reporter array exists
+        if (!result.reporter || !Array.isArray(result.reporter)) {
+            result.reporter = [];
+        }
+
+        // DEFAULT: Add HTML reporter if not present
+        if (!this.hasHtmlReporter(result.reporter)) {
+            result.reporter.push(['html', { outputFolder: 'playwright-report' }]);
+        }
+
+        return result;
+    }
+
+    /**
+     * Check if HTML reporter is configured
+     * ASSUMPTION: Reporter array contains valid reporter configurations
+     */
+    private hasHtmlReporter(reporters: Array<string | [string, any]>): boolean {
+        return reporters.some(reporter => {
+            if (typeof reporter === 'string') {
+                return reporter === 'html';
+            }
+            if (Array.isArray(reporter)) {
+                return reporter[0] === 'html';
+            }
+            return false;
+        });
+    }
+
+    /**
+     * Extract directory paths from configuration  
+     * DEFAULT: HTML report = 'playwright-report', traces use outputDir
+     * ASSUMPTION: Trace is enabled if use.trace is truthy (except 'off')
+     */
+    getDirectoryPaths(config: PlaywrightConfig): DirectoryPaths {
+        return {
+            htmlReportDir: this.getHtmlReportDir(config),
+            traceDir: this.getTraceDir(config)
+        };
+    }
+
+    private getHtmlReportDir(config: PlaywrightConfig): string | null {
+        if (!config.reporter) return null;
+
         for (const reporter of config.reporter) {
             if (typeof reporter === 'string' && reporter === 'html') {
-                htmlReportDir = 'playwright-report'; // Default path
-                break;
-            } else if (Array.isArray(reporter) && reporter[0] === 'html') {
+                return path.resolve(this.projectRoot, 'playwright-report'); // DEFAULT
+            }
+            if (Array.isArray(reporter) && reporter[0] === 'html') {
                 const options = reporter[1] || {};
-                htmlReportDir = options.outputFolder || 'playwright-report';
-                break;
+                const outputFolder = options.outputFolder || 'playwright-report'; // DEFAULT
+                return path.resolve(this.projectRoot, outputFolder);
             }
         }
+        return null;
     }
 
-    // Check if tracing is enabled
-    let traceDir: string | null = null;
-    if (config.use?.trace) {
-        // If trace is enabled (boolean true, or string like 'on', 'on-first-retry', etc.)
+    private getTraceDir(config: PlaywrightConfig): string | null {
+        if (!config.use?.trace) return null;
+
+        // ASSUMPTION: Any truthy trace value except 'off' means tracing is enabled
         const traceEnabled = config.use.trace === true ||
             (typeof config.use.trace === 'string' && config.use.trace !== 'off') ||
             (typeof config.use.trace === 'object');
 
         if (traceEnabled) {
-            traceDir = config.outputDir || 'test-results';
+            return path.resolve(this.projectRoot, config.outputDir || 'test-results'); // DEFAULT
         }
+        return null;
     }
 
-    return {
-        htmlReportDir,
-        traceDir
-    };
+    private async cleanup(filePath: string): Promise<void> {
+        try {
+            if (fs.existsSync(filePath)) {
+                await fs.promises.unlink(filePath);
+            }
+        } catch (error) {
+            // Ignore cleanup errors
+        }
+    }
 }

@@ -3,14 +3,16 @@
 /**
  * cli.ts
  * 
- * Command-line interface for the Playwright Result Scrubber
+ * Enhanced command-line interface with locator-based scrubbing support
  */
 
 import fs from 'fs';
 import path from 'path';
-import { ScrubbingRule, scrubPlaywrightResult } from './index';
+import { DefaultRulesFactory } from './default-rules';
+import { scrubPlaywrightResult } from './index';
+import { ScrubbingRule } from './types';
 
-// Simple CLI argument parser
+// Enhanced CLI argument parser
 async function parseArgs(): Promise<{
     configPath: string;
     rulesFile: string | null;
@@ -18,40 +20,81 @@ async function parseArgs(): Promise<{
     preserveOriginals: boolean;
     verbose: boolean;
     rules: ScrubbingRule[];
+    locatorBased: boolean;
+    maskingStrategy: 'asterisks' | 'placeholder' | 'custom';
+    customMask: string | null;
+    sensitiveFields: string[];
 }> {
     const args = process.argv.slice(2);
-    let configPath = './playwright.config.ts';
+    let configPath = './playwright.config.ts'; // DEFAULT
     let rulesFile: string | null = null;
     let outputDir: string | null = null;
-    let preserveOriginals = false;
-    let verbose = false;
+    let preserveOriginals = false; // DEFAULT
+    let verbose = false; // DEFAULT
+    let locatorBased = true; // DEFAULT: Use locator-based rules
+    let maskingStrategy: 'asterisks' | 'placeholder' | 'custom' = 'asterisks'; // DEFAULT
+    let customMask: string | null = null;
+    let sensitiveFields: string[] = [];
     const inlineRules: ScrubbingRule[] = [];
 
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
 
-        if (arg === '--config' || arg === '-c') {
-            configPath = args[++i];
-        } else if (arg === '--rules' || arg === '-r') {
-            rulesFile = args[++i];
-        } else if (arg === '--output' || arg === '-o') {
-            outputDir = args[++i];
-        } else if (arg === '--preserve' || arg === '-p') {
-            preserveOriginals = true;
-        } else if (arg === '--verbose' || arg === '-v') {
-            verbose = true;
-        } else if (arg === '--pattern') {
-            const pattern = args[++i];
-            const replacement = args[++i];
-            inlineRules.push({ pattern, replacement });
-        } else if (arg === '--help' || arg === '-h') {
-            printHelp();
-            process.exit(0);
+        switch (arg) {
+            case '--config':
+            case '-c':
+                configPath = args[++i];
+                break;
+            case '--rules':
+            case '-r':
+                rulesFile = args[++i];
+                break;
+            case '--output':
+            case '-o':
+                outputDir = args[++i];
+                break;
+            case '--preserve':
+            case '-p':
+                preserveOriginals = true;
+                break;
+            case '--verbose':
+            case '-v':
+                verbose = true;
+                break;
+            case '--pattern':
+                const pattern = args[++i];
+                const replacement = args[++i];
+                inlineRules.push({ pattern, replacement });
+                break;
+            case '--locator-based':
+                locatorBased = true;
+                break;
+            case '--legacy-rules':
+                locatorBased = false;
+                break;
+            case '--masking':
+                maskingStrategy = args[++i] as 'asterisks' | 'placeholder' | 'custom';
+                break;
+            case '--custom-mask':
+                customMask = args[++i];
+                maskingStrategy = 'custom';
+                break;
+            case '--sensitive-field':
+                sensitiveFields.push(args[++i]);
+                break;
+            case '--help':
+            case '-h':
+                printHelp();
+                process.exit(0);
         }
     }
 
-    // Load rules from file if specified
-    const rules = await loadRulesFromFile(rulesFile, inlineRules);
+    // Load rules from file or generate based on strategy
+    const rules = await loadRules(rulesFile, inlineRules, locatorBased, {
+        maskingStrategy,
+        customMask,
+        additionalIdentifiers: sensitiveFields
+    });
 
     return {
         configPath,
@@ -59,48 +102,78 @@ async function parseArgs(): Promise<{
         outputDir,
         preserveOriginals,
         verbose,
-        rules
+        rules,
+        locatorBased,
+        maskingStrategy,
+        customMask,
+        sensitiveFields
     };
 }
 
-async function loadRulesFromFile(rulesFile: string | null, inlineRules: ScrubbingRule[]): Promise<ScrubbingRule[]> {
+/**
+ * Load scrubbing rules from various sources
+ * ASSUMPTION: Rules file contains valid rule objects or exports them
+ * DEFAULT: Falls back to locator-based rules if no rules specified
+ */
+async function loadRules(
+    rulesFile: string | null,
+    inlineRules: ScrubbingRule[],
+    locatorBased: boolean,
+    options: {
+        maskingStrategy: 'asterisks' | 'placeholder' | 'custom';
+        customMask: string | null;
+        additionalIdentifiers: string[];
+    }
+): Promise<ScrubbingRule[]> {
     // If we have inline rules, use those
     if (inlineRules.length > 0) {
         return inlineRules;
     }
 
-    // If no rules file specified, look for default files
-    if (!rulesFile) {
-        const defaultFiles = [
-            './playwright-scrub-rules.json',
-            './playwright-scrub-rules.js'
-        ];
+    // If rules file specified, load from file
+    if (rulesFile) {
+        return await loadRulesFromFile(rulesFile);
+    }
 
-        for (const file of defaultFiles) {
-            if (fs.existsSync(file)) {
-                rulesFile = file;
-                break;
-            }
-        }
+    // Look for default rules files
+    const defaultFiles = [
+        './playwright-scrub-rules.json',
+        './playwright-scrub-rules.js'
+    ];
 
-        // If still no rules file, use default rules
-        if (!rulesFile) {
-            return getDefaultRules();
+    for (const file of defaultFiles) {
+        if (fs.existsSync(file)) {
+            return await loadRulesFromFile(file);
         }
     }
 
-    // Load rules from file
+    // Generate rules based on strategy
+    if (locatorBased) {
+        const config = DefaultRulesFactory.createCustomConfig({
+            additionalIdentifiers: options.additionalIdentifiers,
+            maskingStrategy: options.maskingStrategy,
+            customMask: options.customMask || undefined
+        });
+        return DefaultRulesFactory.getPlaywrightRules(config);
+    } else {
+        return DefaultRulesFactory.getLegacyRules();
+    }
+}
+
+async function loadRulesFromFile(rulesFile: string): Promise<ScrubbingRule[]> {
     try {
         const ext = path.extname(rulesFile).toLowerCase();
 
         if (ext === '.json') {
             const content = fs.readFileSync(rulesFile, 'utf8');
-            return JSON.parse(content);
+            const jsonRules = JSON.parse(content);
+            return DefaultRulesFactory.fromJson(jsonRules);
         } else if (ext === '.js') {
-            // Use dynamic import for ES Modules
-            return (await import(path.resolve(rulesFile))).default || (await import(path.resolve(rulesFile)));
+            const module = await import(path.resolve(rulesFile));
+            const rules = module.default || module;
+            return Array.isArray(rules) ? rules : DefaultRulesFactory.getDefaultRules();
         } else {
-            console.error(`Unsupported rules file extension: ${ext}`);
+            console.error(`Unsupported rules file extension: ${ext}. Supported: .json, .js`);
             process.exit(1);
         }
     } catch (error) {
@@ -110,48 +183,82 @@ async function loadRulesFromFile(rulesFile: string | null, inlineRules: Scrubbin
     }
 }
 
-function getDefaultRules(): ScrubbingRule[] {
-    return [
-        // Password rules
-        { pattern: /password["']?\s*[=:]\s*["']([^"']+)["']/gi, replacement: 'password="********"' },
-        { pattern: /pass["']?\s*[=:]\s*["']([^"']+)["']/gi, replacement: 'pass="********"' },
-
-        // Email patterns
-        { pattern: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, replacement: 'user@example.com' },
-
-        // Credit card numbers
-        { pattern: /\b(?:\d{4}[-\s]?){3}\d{4}\b/g, replacement: '****-****-****-****' },
-
-        // API keys/tokens (common formats)
-        { pattern: /["']?api[-_]?key["']?\s*[=:]\s*["']([^"']{8,})["']/gi, replacement: 'api-key="********"' },
-        { pattern: /["']?auth[-_]?token["']?\s*[=:]\s*["']([^"']{8,})["']/gi, replacement: 'auth-token="********"' },
-
-        // JWT tokens
-        { pattern: /eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}/g, replacement: 'JWT_TOKEN_REMOVED' }
-    ];
-}
-
 function printHelp(): void {
     console.log(`
 Playwright Result Scrubber - Remove sensitive information from Playwright reports and traces
 
 Usage: playwright-scrub [options]
 
-Options:
-  --config, -c     Path to Playwright config file (default: ./playwright.config.ts)
-  --rules, -r      Path to rules file (JSON or JS)
-  --output, -o     Output directory for scrubbed files (default: overwrite originals)
-  --preserve, -p   Preserve original files when output directory is specified
-  --verbose, -v    Enable verbose logging
-  --pattern        Define an inline scrubbing rule (followed by pattern and replacement)
-  --help, -h       Show this help message
+Basic Options:
+  --config, -c         Path to Playwright config file (default: ./playwright.config.ts)
+  --rules, -r          Path to rules file (JSON or JS)
+  --output, -o         Output directory for scrubbed files (default: overwrite originals)
+  --preserve, -p       Preserve original files when output directory is specified
+  --verbose, -v        Enable verbose logging
+  --help, -h           Show this help message
+
+Locator-Based Scrubbing Options:
+  --locator-based      Use locator-based rules (default)
+  --legacy-rules       Use only legacy pattern-based rules
+  --masking <strategy> Masking strategy: asterisks|placeholder|custom (default: asterisks)
+  --custom-mask <mask> Custom mask string (implies --masking custom)
+  --sensitive-field <field> Add custom sensitive field identifier (can be used multiple times)
+
+Legacy Options:
+  --pattern <pattern> <replacement>  Define an inline scrubbing rule
 
 Examples:
+  # Basic usage with locator-based rules
   playwright-scrub
-  playwright-scrub --config=./tests/e2e/playwright.config.ts
-  playwright-scrub --rules=./scrub-rules.json --output=./sanitized-reports
-  playwright-scrub --pattern "password['\"]?\\s*[=:]\\s*['\"]([^'\"]+)['\"]" "password=\\\"********\\\""
-  `);
+
+  # Use placeholder masking instead of asterisks
+  playwright-scrub --masking placeholder
+
+  # Add custom sensitive field identifiers
+  playwright-scrub --sensitive-field "apikey" --sensitive-field "clientsecret"
+
+  # Use custom mask
+  playwright-scrub --custom-mask "[REDACTED]"
+
+  # Use legacy rules only
+  playwright-scrub --legacy-rules
+
+  # Custom config and output
+  playwright-scrub --config ./tests/playwright.config.ts --output ./sanitized-reports
+
+  # Inline pattern (legacy style)
+  playwright-scrub --pattern "myCustomField['\"]?\\s*[=:]\\s*['\"]([^'\"]+)['\"]" "myCustomField=\\\"***\\\""
+
+Locator-Based Scrubbing:
+  The default mode identifies sensitive data based on Playwright locator patterns.
+  It looks for locators containing sensitive field names (password, username, email, etc.)
+  and masks the values passed to .fill(), .type(), and other input methods.
+
+  Example transformations:
+    await page.locator("#password").fill("secret123");
+    → await page.locator("#password").fill("********");
+
+    await page.getByTestId("username-input").fill("john.doe@example.com");
+    → await page.getByTestId("username-input").fill("********");
+
+Default Sensitive Identifiers:
+  password, pass, pwd, secret, token, username, user, login, email, mail,
+  credit, card, ssn, social, phone, address, zip, postal, account, otp, pin
+
+Defaults:
+  - Config path: ./playwright.config.ts
+  - Rules: Locator-based rules with asterisk masking
+  - Output: Overwrite original files
+  - Preserve originals: false
+  - Verbose: false
+  - Masking: asterisks (**********)
+
+Assumptions:
+  - Playwright test files use standard locator patterns
+  - Sensitive fields follow common naming conventions
+  - HTML reports contain test code with locator expressions
+  - Trace files contain both code and runtime values
+    `);
 }
 
 // Main function
@@ -161,7 +268,10 @@ async function main(): Promise<void> {
         outputDir,
         preserveOriginals,
         verbose,
-        rules
+        rules,
+        locatorBased,
+        maskingStrategy,
+        sensitiveFields
     } = await parseArgs();
 
     if (rules.length === 0) {
@@ -171,7 +281,12 @@ async function main(): Promise<void> {
 
     if (verbose) {
         console.log(`Using Playwright config: ${configPath}`);
+        console.log(`Rule strategy: ${locatorBased ? 'Locator-based' : 'Legacy patterns'}`);
+        console.log(`Masking strategy: ${maskingStrategy}`);
         console.log(`Number of scrubbing rules: ${rules.length}`);
+        if (sensitiveFields.length > 0) {
+            console.log(`Custom sensitive fields: ${sensitiveFields.join(', ')}`);
+        }
         if (outputDir) {
             console.log(`Output directory: ${outputDir}`);
         }

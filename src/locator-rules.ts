@@ -246,3 +246,6 @@ export class LocatorRulesFactory {
         ];
     }
 }
+
+export { LocatorRuleConfig };
+

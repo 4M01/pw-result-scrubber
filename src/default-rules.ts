@@ -66,7 +66,8 @@ export class DefaultRulesFactory {
     static getDefaultRules(config?: Partial<LocatorRuleConfig>): ScrubbingRule[] {
         return [
             ...this.getLocatorRules(config),
-            ...this.getLegacyRules()
+            ...this.getLegacyRules(),
+            ...this.getJavaScriptRules() // Add JavaScript-specific rules
         ];
     }
 
@@ -156,5 +157,48 @@ export class DefaultRulesFactory {
             customMask: options.customMask,
             caseSensitive: options.caseSensitive || false
         };
+    }
+
+    /**
+     * Get rules for JavaScript context
+     * ASSUMPTION: Scrubs sensitive data in dynamically injected JavaScript strings
+     */
+    static getJavaScriptRules(): ScrubbingRule[] {
+        return [
+            // Scrub sensitive data in dynamically injected JavaScript strings
+            {
+                pattern: /window\.playwrightReportBase64\s*=\s*["']data:application\/zip;base64,[^"']+["']/g,
+                replacement: 'window.playwrightReportBase64 = "********";'
+            },
+            {
+                pattern: /(["']password["']\s*:\s*["'])([^"']+)(["'])/g,
+                replacement: '$1********$3'
+            },
+            {
+                pattern: /(["']email["']\s*:\s*["'])([^"']+)(["'])/g,
+                replacement: '$1********$3'
+            },
+            {
+                pattern: /(["']token["']\s*:\s*["'])([^"']+)(["'])/g,
+                replacement: '$1********$3'
+            }
+        ];
+    }
+
+    static getBase64DecodedRules(): ScrubbingRule[] {
+        return [
+            {
+                pattern: /(["']password["']\s*:\s*["'])([^"']+)(["'])/g,
+                replacement: '$1********$3'
+            },
+            {
+                pattern: /(["']email["']\s*:\s*["'])([^"']+)(["'])/g,
+                replacement: '$1********$3'
+            },
+            {
+                pattern: /(["']token["']\s*:\s*["'])([^"']+)(["'])/g,
+                replacement: '$1********$3'
+            }
+        ];
     }
 }

@@ -314,3 +314,8 @@ main().catch(error => {
     console.error(`Fatal error: ${message}`);
     process.exit(1);
 });
+
+const rules = DefaultRulesFactory.getDefaultRules({
+    maskingStrategy: 'asterisks',
+    customMask: '[REDACTED]'
+}).concat(DefaultRulesFactory.getBase64DecodedRules());

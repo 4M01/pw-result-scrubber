@@ -48,20 +48,35 @@ export class HtmlReportScrubber extends AbstractScrubber {
         }
 
         try {
-            // Read file content
             const content = await fs.promises.readFile(filePath, 'utf8');
-            const scrubbedContent = this.applyScrubRules(content);
 
-            // Check if content changed
-            if (!this.hasContentChanged(content, scrubbedContent)) {
-                this.log(`No sensitive data found in ${filePath}`);
+            // Regex to match all base64 zip data URIs in the file
+            const base64Pattern = /data:application\/zip;base64,([^"']+)/g;
+            let match;
+            let newContent = content;
+            let found = false;
+
+            while ((match = base64Pattern.exec(content)) !== null) {
+                found = true;
+                const base64Str = match[1];
+                const decoded = decodeBase64(base64Str);
+                const scrubbed = this.applyScrubRules(decoded);
+
+                // Only replace if content changed
+                if (decoded !== scrubbed) {
+                    const reEncoded = encodeBase64(scrubbed);
+                    newContent = newContent.replace(base64Str, reEncoded);
+                }
+            }
+
+            if (!found) {
+                this.log(`No base64 zip data found in ${filePath}`);
                 return;
             }
 
-            // Write scrubbed content
             const outputPath = this.getOutputPath(filePath);
             await this.ensureOutputDirectory(outputPath);
-            await fs.promises.writeFile(outputPath, scrubbedContent, 'utf8');
+            await fs.promises.writeFile(outputPath, newContent, 'utf8');
 
             this.log(`Scrubbed sensitive data from ${filePath}`);
             await this.handleOriginalFile(filePath, outputPath);
@@ -71,4 +86,22 @@ export class HtmlReportScrubber extends AbstractScrubber {
             throw error;
         }
     }
+}
+
+/**
+ * Decode a Base64 encoded string
+ * @param base64Str - The Base64 string to decode
+ * @returns The decoded string
+ */
+function decodeBase64(base64Str: string): string {
+    return Buffer.from(base64Str, 'base64').toString('utf8');
+}
+
+/**
+ * Encode a string to Base64
+ * @param str - The string to encode
+ * @returns The Base64 encoded string
+ */
+function encodeBase64(str: string): string {
+    return Buffer.from(str, 'utf8').toString('base64');
 }

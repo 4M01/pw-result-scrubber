@@ -31,7 +31,7 @@ temp/
 .env.development
 .env.test
 .env.production
-
+CLAUDE.md
 # IDE and editor files
 .idea/
 .vscode/
